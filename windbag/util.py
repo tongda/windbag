@@ -1,3 +1,6 @@
+import functools
+
+import tensorflow as tf
 from windbag.data import cornell_movie
 
 from windbag import config
@@ -19,3 +22,15 @@ def get_buckets():
                            for i in range(len(train_bucket_sizes))]
     print("Bucket scale:\n", train_buckets_scale)
     return test_buckets, data_buckets, train_buckets_scale
+
+
+def ready_for_reuse(name):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            temp_func = tf.make_template(name, func)
+            return temp_func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

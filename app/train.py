@@ -60,7 +60,7 @@ def train(use_attention, num_steps=1000, ckpt_dir="./ckp-dir/", write_summary=Tr
             encoder_inputs, decoder_inputs, decoder_masks = cornell_movie.get_batch(
                 data_buckets[bucket_id], bucket_id, batch_size=config.BATCH_SIZE)
             decoder_lens = np.sum(np.transpose(np.array(decoder_masks), (1, 0)), axis=1)
-            feed_dict = {model.encoder_inputs_tensor: encoder_inputs, model.decoder_inputs_tensor: decoder_inputs,
+            feed_dict = {model.encoder_inputs_tensor: encoder_inputs, model.target_tensor: decoder_inputs,
                          model.decoder_length_tensor: decoder_lens,
                          model.bucket_length: config.BUCKETS[bucket_id]}
             output_logits, res_loss, _ = sess.run([model.final_outputs, model.loss, model.train_op],

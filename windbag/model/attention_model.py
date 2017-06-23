@@ -12,14 +12,6 @@ class AttentionChatBotModel(BasicChatBotModel):
             scope = tf.get_variable_scope()
             scope.set_initializer(tf.random_uniform_initializer(-0.1, 0.1))
 
-            W = tf.get_variable(
-                name="W",
-                shape=[config.DEC_VOCAB, config.HIDDEN_SIZE],
-                initializer=tf.random_uniform_initializer(-0.1, 0.1))
-            target_embedded = tf.nn.embedding_lookup(W, self.decoder_inputs_tensor)
-
-            cell = tf.nn.rnn_cell.GRUCell(num_units=config.HIDDEN_SIZE * 2)
-
             def condition(time, all_outputs, inputs, states):
                 return time < self.bucket_length[1] - 1
                 # return tf.reduce_all(self.decoder_length_tensor > time)

@@ -93,7 +93,7 @@ def chat(use_attention, ckpt_path="./ckp-dir/checkpoints"):
             decoder_lens = np.sum(np.transpose(np.array(decoder_masks), (1, 0)), axis=1)
             output_logits = sess.run([model.final_outputs],
                                      feed_dict={model.encoder_inputs_tensor: encoder_inputs,
-                                                model.decoder_inputs_tensor: decoder_inputs,
+                                                model.target_tensor: decoder_inputs,
                                                 model.decoder_length_tensor: decoder_lens,
                                                 model.bucket_length: config.BUCKETS[bucket_id]})
             response = _construct_response(output_logits, inv_dec_vocab)

@@ -3,7 +3,9 @@ import tensorflow as tf
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import tensor_array_ops
 
+from windbag.model.decoder import Decoder
 from windbag.model.model_base import ChatBotModelBase
+from windbag.util import ready_for_reuse
 
 
 class BasicChatBotModel(ChatBotModelBase):
@@ -15,9 +17,9 @@ class BasicChatBotModel(ChatBotModelBase):
                                                     shape=[None, batch_size],
                                                     name='encoder_inputs')
         self.decoder_length_tensor = tf.placeholder(tf.int32, shape=(batch_size,), name='decoder_lens')
-        self.decoder_inputs_tensor = tf.placeholder(tf.int32,
-                                                    shape=[None, batch_size],
-                                                    name='decoder_inputs')
+        self.target_tensor = tf.placeholder(tf.int32,
+                                            shape=[None, batch_size],
+                                            name='decoder_inputs')
         self.bucket_length = tf.placeholder(tf.int32, shape=(2,), name='bucket_length')
 
         self.global_step = tf.contrib.framework.get_global_step()
@@ -31,6 +33,10 @@ class BasicChatBotModel(ChatBotModelBase):
 
     def build(self):
         enc_outputs, enc_final_state = self.encode()
+
+        hidden_size = enc_final_state.get_shape().as_list()[1]
+        self.decoder = Decoder(config.DEC_VOCAB, hidden_size)
+
         self.final_outputs, final_state = self.decode(enc_outputs, enc_final_state)
         self.train_op = self.create_loss(self.final_outputs)
 
@@ -69,29 +75,18 @@ class BasicChatBotModel(ChatBotModelBase):
             scope = tf.get_variable_scope()
             scope.set_initializer(tf.random_uniform_initializer(-0.1, 0.1))
 
-            W = tf.get_variable(
-                name="W",
-                shape=[config.DEC_VOCAB, config.HIDDEN_SIZE],
-                initializer=tf.random_uniform_initializer(-0.1, 0.1))
-            target_embedded = tf.nn.embedding_lookup(W, self.decoder_inputs_tensor)
-
-            cell = tf.nn.rnn_cell.GRUCell(num_units=config.HIDDEN_SIZE * 2)
-            print("target_embedded.get_shape(): ", target_embedded.get_shape())
-            print("enc_final_state.get_shape(), ", enc_final_state.get_shape())
-
             def condition(time, all_outputs, inputs, states):
                 return time < self.bucket_length[1] - 1
                 # return tf.reduce_all(self.decoder_length_tensor > time)
 
-            def body(time, all_outputs, inputs, states):
-                dec_outputs, dec_state = cell(inputs=inputs, state=states)
+            def body(time, all_outputs, inputs, state):
+                dec_outputs, dec_state = self.decoder.step(inputs, state)
                 output_logits = tf.contrib.layers.fully_connected(inputs=dec_outputs, num_outputs=config.DEC_VOCAB,
                                                                   activation_fn=None)
                 all_outputs = all_outputs.write(time, output_logits)
 
-                output_label = tf.arg_max(output_logits, dimension=1)
-                next_input = tf.nn.embedding_lookup(W, output_label)
-                next_input.set_shape((self.batch_size, config.HIDDEN_SIZE))
+                next_input = tf.cast(tf.argmax(output_logits, axis=1), tf.int32)
+                print("next_input: ", next_input)
 
                 return time + 1, all_outputs, next_input, dec_state
 
@@ -100,10 +95,11 @@ class BasicChatBotModel(ChatBotModelBase):
                                                      dynamic_size=True,
                                                      element_shape=(self.batch_size, config.DEC_VOCAB))
 
+            print("self.target_tensor[0]: ", self.target_tensor[0])
             res = control_flow_ops.while_loop(
                 condition,
                 body,
-                loop_vars=[0, output_ta, target_embedded[0], enc_final_state],
+                loop_vars=[0, output_ta, self.target_tensor[0], enc_final_state],
             )
             final_outputs = res[1].stack()
             final_state = res[3]
@@ -112,9 +108,9 @@ class BasicChatBotModel(ChatBotModelBase):
     def create_loss(self, final_outputs):
         with tf.variable_scope('loss') as scope:
             print("final_outputs: ", final_outputs.get_shape())
-            print("self.decoder_inputs_tensor: ", self.decoder_inputs_tensor.get_shape())
+            print("self.decoder_inputs_tensor: ", self.target_tensor.get_shape())
             losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=final_outputs, labels=self.decoder_inputs_tensor[1:])
+                logits=final_outputs, labels=self.target_tensor[1:])
 
             loss_mask = tf.sequence_mask(
                 tf.to_int32(self.decoder_length_tensor), self.bucket_length[1] - 1)
@@ -128,8 +124,5 @@ class BasicChatBotModel(ChatBotModelBase):
             self.grads = self.optimizer.compute_gradients(self.loss, trainables)
             tf.summary.scalar("loss", self.loss)
             train_op = self.optimizer.apply_gradients(self.grads, global_step=self.global_step)
-        for gradient, variable in self.grads:
-            tf.summary.histogram("gradients/{}".format(variable.name.replace(":", "_")), gradient)
-            tf.summary.histogram("variable/{}".format(variable.name.replace(":", "_")), variable)
 
         return train_op
