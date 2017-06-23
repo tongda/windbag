@@ -81,12 +81,12 @@ class BasicChatBotModel(ChatBotModelBase):
 
             def body(time, all_outputs, inputs, state):
                 dec_outputs, dec_state = self.decoder.step(inputs, state)
-                output_logits = tf.contrib.layers.fully_connected(inputs=dec_outputs, num_outputs=config.DEC_VOCAB,
-                                                                  activation_fn=None)
-                all_outputs = all_outputs.write(time, output_logits)
-
-                next_input = tf.cast(tf.argmax(output_logits, axis=1), tf.int32)
-                print("next_input: ", next_input)
+                with tf.variable_scope("decoding_projection"):
+                    # TODO: move this into decoder
+                    output_logits = tf.contrib.layers.fully_connected(
+                        inputs=dec_outputs, num_outputs=config.DEC_VOCAB, activation_fn=None)
+                    all_outputs = all_outputs.write(time, output_logits)
+                    next_input = tf.cast(tf.argmax(output_logits, axis=1), tf.int32)
 
                 return time + 1, all_outputs, next_input, dec_state
 
