@@ -1,11 +1,10 @@
-from windbag import config
 import tensorflow as tf
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import tensor_array_ops
 
+from windbag import config
 from windbag.model.decoder import Decoder
 from windbag.model.model_base import ChatBotModelBase
-from windbag.util import ready_for_reuse
 
 
 class BasicChatBotModel(ChatBotModelBase):
@@ -71,23 +70,14 @@ class BasicChatBotModel(ChatBotModelBase):
         return enc_outputs, enc_final_state
 
     def decode(self, enc_outputs, enc_final_state):
-        with tf.variable_scope('decoder') as scope:
-            scope = tf.get_variable_scope()
-            scope.set_initializer(tf.random_uniform_initializer(-0.1, 0.1))
-
+        with tf.variable_scope(self.decoder.scope):
             def condition(time, all_outputs, inputs, states):
                 return time < self.bucket_length[1] - 1
                 # return tf.reduce_all(self.decoder_length_tensor > time)
 
             def body(time, all_outputs, inputs, state):
-                dec_outputs, dec_state = self.decoder.step(inputs, state)
-                with tf.variable_scope("decoding_projection"):
-                    # TODO: move this into decoder
-                    output_logits = tf.contrib.layers.fully_connected(
-                        inputs=dec_outputs, num_outputs=config.DEC_VOCAB, activation_fn=None)
-                    all_outputs = all_outputs.write(time, output_logits)
-                    next_input = tf.cast(tf.argmax(output_logits, axis=1), tf.int32)
-
+                dec_outputs, dec_state, output_logits, next_input = self.decoder.step(inputs, state)
+                all_outputs = all_outputs.write(time, output_logits)
                 return time + 1, all_outputs, next_input, dec_state
 
             output_ta = tensor_array_ops.TensorArray(dtype=tf.float32,
@@ -99,7 +89,7 @@ class BasicChatBotModel(ChatBotModelBase):
             res = control_flow_ops.while_loop(
                 condition,
                 body,
-                loop_vars=[0, output_ta, self.target_tensor[0], enc_final_state],
+                loop_vars=[0, output_ta, self.decoder.zero_input(self.target_tensor[0]), enc_final_state],
             )
             final_outputs = res[1].stack()
             final_state = res[3]
