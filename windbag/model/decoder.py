@@ -20,15 +20,15 @@ class Decoder(object):
 
     def step(self, inputs, state):
         with tf.variable_scope(self.scope):
-            embedded = self._lookup(inputs=inputs)
-            outputs, nxt_state = self.cell(inputs=embedded, state=state)
+            outputs, nxt_state = self.cell(inputs=inputs, state=state)
             logits = tf.contrib.layers.fully_connected(
                 inputs=outputs, num_outputs=self.vocab_size, activation_fn=None)
             next_input = tf.cast(tf.argmax(logits, axis=1), tf.int32)
+            next_input = self._lookup(next_input)
             return outputs, nxt_state, logits, next_input
 
     def zero_input(self, inputs):
-        return inputs
+        return self._lookup(inputs=inputs)
 
 
 class AttentionDecoder(Decoder):
