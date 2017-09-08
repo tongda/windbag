@@ -102,3 +102,6 @@ ENV/
 
 # pycharm file
 .idea
+
+# checkpoint dir
+ckp-dir
