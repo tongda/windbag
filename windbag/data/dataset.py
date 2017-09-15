@@ -86,16 +86,16 @@ class CornellMovieDataset(WindbagDataset):
     def _reduce_batch(key, batch):
       return batch.padded_batch(batch_size, ((), (None,), (), (None,)))
 
-    questions_and_answers: Dataset = Dataset.zip((
+    questions_and_answers = Dataset.zip((
       question_dataset.map(lambda q: tf.size(q)),
       question_dataset,
       answer_dataset.map(lambda a: tf.size(a)),
       answer_dataset,
     ))
-    questions_and_answers: Dataset = questions_and_answers.group_by_window(
+    questions_and_answers = questions_and_answers.group_by_window(
       _which_bucket, _reduce_batch, batch_size)
     if shuffle:
-      questions_and_answers: Dataset = questions_and_answers.shuffle(shuffle_size)
+      questions_and_answers = questions_and_answers.shuffle(shuffle_size)
     return questions_and_answers
 
   @property
