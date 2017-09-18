@@ -56,7 +56,7 @@ def train(use_attention, num_steps=1000, ckpt_dir="./ckp-dir/", write_summary=Tr
   if not os.path.exists(ckpt_dir):
     os.mkdir(ckpt_dir)
 
-  dataset = CornellMovieDataset(config.PROCESSED_PATH, config.BATCH_SIZE, 2, config.BATCH_SIZE, True)
+  dataset = CornellMovieDataset(config.PROCESSED_PATH, config.BATCH_SIZE, None, config.BATCH_SIZE, True)
 
   if not use_attention:
     model = BasicChatBotModel(features=dataset.train_features, targets=None, batch_size=config.BATCH_SIZE)
