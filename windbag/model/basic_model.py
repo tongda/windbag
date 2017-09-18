@@ -80,7 +80,7 @@ class BasicChatBotModel(ChatBotModelBase):
       output_ta = tensor_array_ops.TensorArray(dtype=tf.float32,
                                                size=0,
                                                dynamic_size=True,
-                                               element_shape=(self.batch_size, config.DEC_VOCAB))
+                                               element_shape=(None, config.DEC_VOCAB))
 
       print("self.target_tensor[0]: ", self.target_tensor[0])
       res = control_flow_ops.while_loop(
