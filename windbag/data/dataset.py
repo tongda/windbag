@@ -61,9 +61,9 @@ class CornellMovieDataset(WindbagDataset):
                                     train_features))
 
     # test data should be reinitialized every time it is used
-    self._test_dataset = self._build_datasets("test",
-                                              batch_size=test_batch_size,
-                                              shuffle=False)
+    self._test_features = self._build_datasets("test",
+                                               batch_size=test_batch_size,
+                                               shuffle=False)
 
   def _build_datasets(self, dataset_prefix, batch_size, shuffle, shuffle_size=1024):
     question_path = os.path.join(self.data_dir, "%s_ids.enc" % dataset_prefix)
@@ -120,7 +120,7 @@ class CornellMovieDataset(WindbagDataset):
 
   @property
   def test_features(self):
-    test_iterator = self._test_dataset.make_initializable_iterator()
+    test_iterator = self._test_features.make_initializable_iterator()
     features = test_iterator.get_next()
 
     test_features = dict(zip(CornellMovieDataset.FEATURE_NAMES, features))
