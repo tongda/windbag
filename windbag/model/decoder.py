@@ -43,6 +43,7 @@ class AttentionDecoder(Decoder):
       scores_normalized = self._compute_scores(outputs)
 
       context = tf.expand_dims(scores_normalized, 2) * self.enc_outputs
+      # context is (batch_size, encoding output state size)
       context = tf.reduce_sum(context, [0], name="context")
 
       logits = self._compute_logits(context, outputs)
@@ -71,11 +72,14 @@ class AttentionDecoder(Decoder):
     return logits
 
   def _compute_scores(self, outputs):
+    # att_keys is (num of words, batch size, context units)
     att_keys = tf.contrib.layers.fully_connected(
       inputs=self.enc_outputs, num_outputs=self.num_ctx_units, activation_fn=None)
+    # att_query is (batch size, context units)
     att_query = tf.contrib.layers.fully_connected(
       inputs=outputs, num_outputs=self.num_ctx_units, activation_fn=None)
     # the simplest score function
     scores = tf.reduce_sum(att_keys * tf.expand_dims(att_query, 0), [2])
     scores_normalized = tf.nn.softmax(scores, dim=0)
+    # scores_normalized is (num of words, batch size)
     return scores_normalized
