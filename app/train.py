@@ -3,11 +3,14 @@ import os
 import random
 
 import tensorflow as tf
+from tensorflow.python.estimator.estimator import Estimator
+from tensorflow.python.estimator.model_fn import EstimatorSpec, ModeKeys
+
 from windbag import config
 from windbag.data import cornell_movie
 from windbag.data.dataset import CornellMovieDataset
 from windbag.model.attention_model import AttentionChatBotModel
-from windbag.model.basic_model import BasicChatBotModel
+from windbag.model.basic_model import BasicChatBotModel, create_loss
 
 
 def need_print_log(step):
@@ -24,25 +27,30 @@ def _get_random_bucket(train_buckets_scale):
               if train_buckets_scale[i] > rand])
 
 
-def model_fn(features, targets, mode, params):
-  model = AttentionChatBotModel(features, targets, batch_size=config.BATCH_SIZE)
+def model_fn(features, labels, mode, params, config):
+  model = AttentionChatBotModel(features)
   model.build()
+  predictions = tf.argmax(model.final_outputs, axis=-1)
+  loss_op = None
+  train_op = None
 
-  tf.contrib.learn.ModelFnOps(
+  if mode != ModeKeys.PREDICT:
+    loss_op, train_op = create_loss(model.final_outputs, labels)
+
+  return EstimatorSpec(
     mode=mode,
-    predictions=model.final_outputs,
-    loss=model.loss,
-    train_op=model.train_op
+    predictions=predictions,
+    loss=loss_op,
+    train_op=train_op,
+    eval_metric_ops={"Accuracy": tf.metrics.accuracy(labels=labels, predictions=predictions, name='accuracy')},
+    export_outputs={"Answer": "ClassificationOutput"}
   )
 
 
 def train_by_estimator(output_dir):
-  reader = tf.TextLineReader()
-  source_tensor = tf.read_file(os.path.join(config.PROCESSED_PATH, "test_ids.enc"))
-  tf.gfile.FastGFile()
-  reader.read()
+  dataset = CornellMovieDataset(config.PROCESSED_PATH, config.BATCH_SIZE, None, config.BATCH_SIZE, True)
 
-  estimator = tf.contrib.learn.Estimator(
+  estimator = Estimator(
     model_fn=model_fn,
     model_dir=output_dir,
     config=config)
@@ -59,10 +67,12 @@ def train(use_attention, num_steps=1000, ckpt_dir="./ckp-dir/", write_summary=Tr
   dataset = CornellMovieDataset(config.PROCESSED_PATH, config.BATCH_SIZE, None, config.BATCH_SIZE, True)
 
   if not use_attention:
-    model = BasicChatBotModel(features=dataset.train_features, targets=None, batch_size=config.BATCH_SIZE)
+    model = BasicChatBotModel(features=dataset.train_features)
   else:
-    model = AttentionChatBotModel(features=dataset.train_features, targets=None, batch_size=config.BATCH_SIZE)
+    model = AttentionChatBotModel(features=dataset.train_features)
   model.build()
+
+  loss_op, train_op = create_loss(model.final_outputs, dataset.train_features)
 
   cfg = tf.ConfigProto()
   cfg.gpu_options.allow_growth = True
@@ -78,7 +88,7 @@ def train(use_attention, num_steps=1000, ckpt_dir="./ckp-dir/", write_summary=Tr
     summary_writer = tf.summary.FileWriter(log_root + exp_name, graph=sess.graph)
     sess.run(tf.global_variables_initializer())
     for step in range(num_steps + 1):
-      output_logits, res_loss, _ = sess.run([model.final_outputs, model.loss, model.train_op])
+      output_logits, res_loss, _ = sess.run([model.final_outputs, loss_op, train_op])
       if need_print_log(step):
         print("Iteration {} - loss:{}".format(step, res_loss))
         if write_summary:

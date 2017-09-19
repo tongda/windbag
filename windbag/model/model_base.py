@@ -2,9 +2,8 @@ import abc
 
 
 class ChatBotModelBase(metaclass=abc.ABCMeta):
-    def __init__(self, features, targets):
+    def __init__(self, features):
         self.features = features
-        self.targets = targets
 
     @abc.abstractmethod
     def encode(self):
@@ -16,8 +15,4 @@ class ChatBotModelBase(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def build(self):
-        raise NotImplemented
-
-    @abc.abstractmethod
-    def create_loss(self, final_outputs):
         raise NotImplemented

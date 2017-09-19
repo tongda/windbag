@@ -6,17 +6,78 @@ from windbag import config
 from windbag.model.decoder import Decoder
 from windbag.model.model_base import ChatBotModelBase
 
+ANSWER_START = 2
+ANSWER_END = 3
+ANSWER_MAX = 60
+
+
+def create_loss(final_outputs, labels):
+  '''
+  Final outputs of the decoder may have different length with
+  target answer. So we should pad the outputs if the outputs
+  are shorter than target answer, and pad the target answers
+  if outputs are longer than answers.
+  :param final_outputs: the output of decoder
+  :param labels: the target answers
+  :return: tuple of loss_op and train_op
+  '''
+  with tf.variable_scope('loss') as scope:
+    target_lens_tensor = labels['answer_len']
+    target_tensor = tf.transpose(labels['answer'], (1, 0))
+    print("target_tensor[0]: ", target_tensor[0])
+    print("final_outputs: ", final_outputs.get_shape())
+    print("decoder_inputs_tensor: ", target_tensor.get_shape())
+
+    answer_max_len = tf.reduce_max(target_lens_tensor)
+    output_len = tf.shape(final_outputs)[0]
+
+    def loss_with_padded_outputs():
+      indexes = [[0, 1]]
+      values = tf.expand_dims(answer_max_len - output_len - 1, axis=0)
+      # because rank of final outputs tensor is 3, so the shape is (3, 2)
+      shape = [3, 2]
+      paddings = tf.scatter_nd(indexes, values, shape)
+      padded_outputs = tf.pad(final_outputs, paddings)
+      return tf.nn.sparse_softmax_cross_entropy_with_logits(
+        logits=padded_outputs, labels=target_tensor[1:])
+
+    def loss_with_padded_answers():
+      indexes = [[0, 1]]
+      values = tf.expand_dims(output_len - answer_max_len + 1, axis=0)
+      # because rank of answers tensor is 2, so the shape is (2, 2)
+      shape = [2, 2]
+      paddings = tf.scatter_nd(indexes, values, shape)
+      padded_answer = tf.pad(target_tensor, paddings)
+      return tf.nn.sparse_softmax_cross_entropy_with_logits(
+        logits=final_outputs, labels=padded_answer[1:])
+
+    losses = tf.cond(output_len < answer_max_len, loss_with_padded_outputs, loss_with_padded_answers)
+
+    losses_length = tf.shape(losses)[0]
+    loss_mask = tf.sequence_mask(
+      tf.to_int32(target_lens_tensor), losses_length)
+
+    losses = losses * tf.transpose(tf.to_float(loss_mask), [1, 0])
+    # self.loss = tf.reduce_mean(losses)
+    loss = tf.reduce_sum(losses) / tf.to_float(tf.reduce_sum(target_lens_tensor - 1))
+
+    optimizer = tf.train.AdamOptimizer(learning_rate=config.LR)
+    trainables = tf.trainable_variables()
+    grads = optimizer.compute_gradients(loss, trainables)
+    tf.summary.scalar("loss", loss)
+    global_step = tf.contrib.framework.get_global_step()
+    train_op = optimizer.apply_gradients(grads, global_step=global_step)
+
+    tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss)
+
+  return loss, train_op
+
 
 class BasicChatBotModel(ChatBotModelBase):
-  def __init__(self, features, targets, batch_size):
-    super(BasicChatBotModel, self).__init__(features, targets)
-    self.batch_size = batch_size
+  def __init__(self, features):
+    super(BasicChatBotModel, self).__init__(features)
 
     self.source_tensor = tf.transpose(features['question'], (1, 0))
-    self.target_lens_tensor = features['answer_len']
-    self.target_tensor = tf.transpose(features['answer'], (1, 0))
-
-    self.global_step = tf.contrib.framework.get_global_step()
 
   @property
   def summaries(self, use_all=False):
@@ -32,7 +93,6 @@ class BasicChatBotModel(ChatBotModelBase):
     self.decoder = Decoder(config.DEC_VOCAB, hidden_size)
 
     self.final_outputs, final_state = self.decode(enc_outputs, enc_final_state)
-    self.train_op = self.create_loss(self.final_outputs)
 
     tf.summary.histogram("final-outputs", self.final_outputs)
 
@@ -67,9 +127,10 @@ class BasicChatBotModel(ChatBotModelBase):
 
   def decode(self, enc_outputs, enc_final_state):
     with tf.variable_scope(self.decoder.scope):
-      def condition(time, all_outputs, inputs, states):
-        bucket_length = tf.shape(self.target_tensor)[0]
-        return time < bucket_length - 1
+      def condition(time, all_outputs: tf.TensorArray, inputs, states):
+        # bucket_length = tf.shape(self.target_tensor)[0]
+        all_ends = tf.reduce_all(all_outputs.read(time) == ANSWER_END)
+        return tf.logical_and(tf.logical_not(all_ends), tf.less(time, ANSWER_MAX))
         # return tf.reduce_all(self.decoder_length_tensor > time)
 
       def body(time, all_outputs, inputs, state):
@@ -82,37 +143,15 @@ class BasicChatBotModel(ChatBotModelBase):
                                                dynamic_size=True,
                                                element_shape=(None, config.DEC_VOCAB))
 
-      print("self.target_tensor[0]: ", self.target_tensor[0])
+      # with time-major data input, the batch size is the second dimension
+      batch_size = tf.shape(enc_outputs)[1]
+      # zero_input = tf.ones(tf.concat([tf.expand_dims(batch_size, axis=0), [1]], axis=0), dtype=tf.int32) * ANSWER_START
+      zero_input = tf.ones(tf.expand_dims(batch_size, axis=0), dtype=tf.int32) * ANSWER_START
       res = control_flow_ops.while_loop(
         condition,
         body,
-        loop_vars=[0, output_ta, self.decoder.zero_input(self.target_tensor[0]), enc_final_state],
+        loop_vars=[0, output_ta, self.decoder.zero_input(zero_input), enc_final_state],
       )
       final_outputs = res[1].stack()
       final_state = res[3]
     return final_outputs, final_state
-
-  def create_loss(self, final_outputs):
-    with tf.variable_scope('loss') as scope:
-      print("final_outputs: ", final_outputs.get_shape())
-      print("self.decoder_inputs_tensor: ", self.target_tensor.get_shape())
-      losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        logits=final_outputs, labels=self.target_tensor[1:])
-
-      bucket_length = tf.shape(self.target_tensor)[0]
-      loss_mask = tf.sequence_mask(
-        tf.to_int32(self.target_lens_tensor), bucket_length - 1)
-
-      losses = losses * tf.transpose(tf.to_float(loss_mask), [1, 0])
-      # self.loss = tf.reduce_mean(losses)
-      self.loss = tf.reduce_sum(losses) / tf.to_float(tf.reduce_sum(self.target_lens_tensor - 1))
-
-      self.optimizer = tf.train.AdamOptimizer(learning_rate=config.LR)
-      trainables = tf.trainable_variables()
-      self.grads = self.optimizer.compute_gradients(self.loss, trainables)
-      tf.summary.scalar("loss", self.loss)
-      train_op = self.optimizer.apply_gradients(self.grads, global_step=self.global_step)
-
-      tf.train.AdamOptimizer(learning_rate=0.001).minimize(self.loss)
-
-    return train_op
