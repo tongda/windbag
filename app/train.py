@@ -3,8 +3,12 @@ import os
 import random
 
 import tensorflow as tf
+from tensorflow.contrib.learn import Experiment
+from tensorflow.contrib.learn.python.learn import learn_runner, RunConfig
+from tensorflow.contrib.training import HParams
 from tensorflow.python.estimator.estimator import Estimator
 from tensorflow.python.estimator.model_fn import EstimatorSpec, ModeKeys
+from tensorflow.python.training.session_run_hook import SessionRunHook
 
 from windbag import config
 from windbag.data import cornell_movie
@@ -41,19 +45,67 @@ def model_fn(features, labels, mode, params, config):
     mode=mode,
     predictions=predictions,
     loss=loss_op,
-    train_op=train_op,
-    eval_metric_ops={"Accuracy": tf.metrics.accuracy(labels=labels, predictions=predictions, name='accuracy')},
-    export_outputs={"Answer": "ClassificationOutput"}
+    train_op=train_op
+    # eval_metric_ops={"Accuracy": tf.metrics.accuracy(labels=labels['answer'], predictions=predictions, name='accuracy')}
   )
 
 
-def train_by_estimator(output_dir):
-  dataset = CornellMovieDataset(config.PROCESSED_PATH, config.BATCH_SIZE, None, config.BATCH_SIZE, True)
+class IteratorInitializerHook(SessionRunHook):
+  def __init__(self):
+    super(IteratorInitializerHook, self).__init__()
+    self.iterator_initializer = None
 
+  def after_create_session(self, session, coord):
+    session.run(self.iterator_initializer)
+
+
+def experiment_fn(run_config, hparams):
   estimator = Estimator(
     model_fn=model_fn,
-    model_dir=output_dir,
-    config=config)
+    params=hparams,
+    config=run_config)
+
+  # dataset = CornellMovieDataset(config.PROCESSED_PATH, config.BATCH_SIZE, None, config.BATCH_SIZE, True)
+
+  def train_input_fn():
+    dataset = CornellMovieDataset(config.PROCESSED_PATH, config.BATCH_SIZE, None, config.BATCH_SIZE, True)
+    return dataset.train_features, dataset.train_features
+
+  eval_initializer_hook = IteratorInitializerHook()
+
+  def test_input_fn():
+    dataset = CornellMovieDataset(config.PROCESSED_PATH, config.BATCH_SIZE, None, config.BATCH_SIZE, True)
+    initializer, features = dataset.test_features
+    eval_initializer_hook.iterator_initializer = initializer
+    return features, features
+
+  experiment = Experiment(
+    estimator=estimator,
+    train_input_fn=train_input_fn,
+    eval_input_fn=test_input_fn,
+    train_steps=hparams.train_steps,
+    eval_hooks=[eval_initializer_hook],
+    eval_steps=None,
+  )
+  return experiment
+
+
+def train_by_estimator(output_dir, train_steps):
+  run_config = RunConfig()
+  run_config = run_config.replace(model_dir=output_dir)
+
+  params = HParams(
+    learning_rate=config.LR,
+    train_steps=train_steps,
+    min_eval_frequency=100
+  )
+
+  learn_runner.run(
+    experiment_fn=experiment_fn,
+    run_config=run_config,
+    schedule="train_and_evaluate",
+    hparams=params
+  )
 
 
 def train(use_attention, num_steps=1000, ckpt_dir="./ckp-dir/", write_summary=True, tag=None):
@@ -115,4 +167,11 @@ if __name__ == '__main__':
 
   parser = create_parser()
   args = parser.parse_args()
-  train(args.use_attention, num_steps=args.num_steps, write_summary=args.write_summary, tag=args.tag)
+  # train(args.use_attention, num_steps=args.num_steps, write_summary=args.write_summary, tag=args.tag)
+  exp_name = (("attention" if args.use_attention else "basic") +
+              "-step_" + str(args.num_steps) +
+              "-batch_" + str(config.BATCH_SIZE) +
+              "-lr_" + str(config.LR))
+  if args.tag:
+    exp_name += "-" + args.tag
+  train_by_estimator(os.path.join("./ckp-dir/", exp_name), args.num_steps)

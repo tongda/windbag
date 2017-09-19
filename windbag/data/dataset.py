@@ -125,4 +125,4 @@ class CornellMovieDataset(WindbagDataset):
 
     test_features = dict(zip(CornellMovieDataset.FEATURE_NAMES, features))
 
-    return test_iterator.initializer(), test_features
+    return test_iterator.initializer, test_features
