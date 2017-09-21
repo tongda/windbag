@@ -61,16 +61,7 @@ def create_loss(final_outputs, labels):
     # self.loss = tf.reduce_mean(losses)
     loss = tf.reduce_sum(losses) / tf.to_float(tf.reduce_sum(target_lens_tensor - 1))
 
-    optimizer = tf.train.AdamOptimizer(learning_rate=config.LR)
-    trainables = tf.trainable_variables()
-    grads = optimizer.compute_gradients(loss, trainables)
-    tf.summary.scalar("loss", loss)
-    global_step = tf.contrib.framework.get_global_step()
-    train_op = optimizer.apply_gradients(grads, global_step=global_step)
-
-    tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss)
-
-  return loss, train_op
+  return loss
 
 
 class BasicChatBotModel(ChatBotModelBase):
