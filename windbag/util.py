@@ -1,6 +1,8 @@
 import functools
 
 import tensorflow as tf
+from tensorflow.contrib.data import Dataset
+
 from windbag.data import cornell_movie
 
 from windbag import config
@@ -34,3 +36,49 @@ def ready_for_reuse(name):
     return wrapper
 
   return decorator
+
+
+def bucketing(questions,
+              answers,
+              boundaries,
+              batch_size,
+              shuffle,
+              shuffle_size):
+  '''
+  Bucketing questions and answers for training.
+
+  :param questions:
+  :param answers:
+  :param boundaries:
+  :param batch_size:
+  :param shuffle:
+  :param shuffle_size:
+  :return:
+   Tuple of (question length, question, answer length, answer)
+  '''
+
+  def _which_bucket(question_len, question, answer_len, answer):
+    q_max_boundaries, a_max_boundaries = list(zip(*boundaries))
+    which_bucket = tf.reduce_min(
+      tf.where(tf.logical_and(
+        question_len <= q_max_boundaries,
+        answer_len <= a_max_boundaries
+      ))
+    )
+    return tf.to_int64(which_bucket)
+
+  def _reduce_batch(key, batch):
+    return batch.padded_batch(batch_size, ((), (None,), (), (None,)))
+
+  q_max, a_max = max(boundaries)
+  questions_and_answers = Dataset.zip((
+    questions.map(lambda q: tf.size(q)),
+    questions,
+    answers.map(lambda a: tf.size(a)),
+    answers,
+  )).filter(lambda q_size, q, a_size, a: tf.logical_and(q_size <= q_max, a_size <= a_max))
+  questions_and_answers = questions_and_answers.group_by_window(
+    _which_bucket, _reduce_batch, batch_size)
+  if shuffle:
+    questions_and_answers = questions_and_answers.shuffle(shuffle_size)
+  return questions_and_answers

@@ -1,10 +1,13 @@
+import abc
+
 import tensorflow as tf
+from tensorflow.python.estimator.model_fn import ModeKeys, EstimatorSpec
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import tensor_array_ops
 
 from windbag import config
-from windbag.model.decoder import Decoder
-from windbag.model.model_base import ChatBotModelBase
+from windbag.model.decoder import Decoder, AttentionDecoder
+from windbag.util import bucketing
 
 ANSWER_START = 2
 ANSWER_END = 3
@@ -63,6 +66,23 @@ def create_loss(final_outputs, answers, answer_lens):
     loss = tf.reduce_sum(losses) / tf.to_float(tf.reduce_sum(answer_lens - 1))
 
   return loss
+
+
+class ChatBotModelBase(metaclass=abc.ABCMeta):
+  def __init__(self, features):
+    self.features = features
+
+  @abc.abstractmethod
+  def encode(self):
+    raise NotImplemented
+
+  @abc.abstractmethod
+  def decode(self, enc_outputs, enc_final_state):
+    raise NotImplemented
+
+  @abc.abstractmethod
+  def build(self):
+    raise NotImplemented
 
 
 class BasicChatBotModel(ChatBotModelBase):
@@ -147,3 +167,69 @@ class BasicChatBotModel(ChatBotModelBase):
       final_outputs = res[1].stack()
       final_state = res[3]
     return final_outputs, final_state
+
+
+class AttentionChatBotModel(BasicChatBotModel):
+  def build(self):
+    enc_outputs, enc_final_state = self.encode()
+
+    hidden_size = enc_final_state.get_shape().as_list()[1]
+    self.decoder = AttentionDecoder(
+      config.DEC_VOCAB, hidden_size, enc_outputs=enc_outputs, num_ctx_hidden_units=config.CONTEXT_SIZE)
+
+    self.final_outputs, final_state = self.decode(enc_outputs, enc_final_state)
+
+    tf.summary.histogram("final-outputs", self.final_outputs)
+
+
+def model_fn(features, labels, mode, params, config):
+  questions_and_answers = bucketing(
+    questions=features,
+    answers=labels,
+    boundaries=params.buckets,
+    batch_size=params.batch_size,
+    shuffle=params.shuffle,
+    shuffle_size=params.shuffle_size
+  )
+
+  qlen_it = q_it = alen_it = a_it = None
+
+  if mode == ModeKeys.TRAIN:
+    qlen_it, q_it, alen_it, a_it = questions_and_answers \
+      .repeat() \
+      .make_one_shot_iterator() \
+      .get_next()
+
+  if mode == ModeKeys.EVAL:
+    iterator = questions_and_answers \
+      .make_initializable_iterator()
+    qlen_it, q_it, alen_it, a_it = iterator.get_next()
+    tf.add_to_collection("initializer", iterator.initializer)
+
+  model = AttentionChatBotModel(q_it)
+  model.build()
+  predictions = tf.argmax(model.final_outputs, axis=-1)
+  loss_op = None
+  train_op = None
+
+  if mode != ModeKeys.PREDICT:
+    loss_op = create_loss(model.final_outputs, a_it, alen_it)
+    train_op = _get_train_op(loss_op, params.learning_rate)
+
+  return EstimatorSpec(
+    mode=mode,
+    predictions=predictions,
+    loss=loss_op,
+    train_op=train_op
+    # eval_metric_ops={"Accuracy": tf.metrics.accuracy(labels=labels['answer'], predictions=predictions, name='accuracy')}
+  )
+
+
+def _get_train_op(loss_op, learning_rate):
+  optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
+  trainables = tf.trainable_variables()
+  grads = optimizer.compute_gradients(loss_op, trainables)
+  tf.summary.scalar("loss", loss_op)
+  global_step = tf.contrib.framework.get_global_step()
+  train_op = optimizer.apply_gradients(grads, global_step=global_step)
+  return train_op

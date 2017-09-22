@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 
 from windbag import config
-from windbag.model.basic_model import BasicChatBotModel
+from windbag.model.model import BasicChatBotModel
 
 
 class BasicModelTestCase(tf.test.TestCase):

@@ -5,8 +5,7 @@ from windbag import config
 from windbag.data import cornell_movie
 import numpy as np
 import tensorflow as tf
-from windbag.model.basic_model import BasicChatBotModel
-from windbag.model.attention_model import AttentionChatBotModel
+from windbag.model.model import BasicChatBotModel, AttentionChatBotModel
 
 
 def _check_restore_parameters(sess, saver, ckpt_path):
