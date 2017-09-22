@@ -32,9 +32,7 @@ def _construct_response(output_logits, inv_dec_vocab):
 
   This is a greedy decoder - outputs are just argmaxes of output_logits.
   """
-  print("logits: ", output_logits[0])
   outputs = [int(np.argmax(logit, axis=1)) for logit in output_logits[0]]
-  print(outputs)
   # If there is an EOS symbol in outputs, cut them at that point.
   if config.EOS_ID in outputs:
     outputs = outputs[:outputs.index(config.EOS_ID)]
@@ -56,11 +54,7 @@ def chat(use_attention, ckpt_path="./ckp-dir/checkpoints"):
     model = BasicChatBotModel(batch_size=1)
   else:
     # TODO: here is a hot fix to pass features into model, should be refactored
-    model = AttentionChatBotModel(
-      features={'question': question, 'answer_len': tf.constant([0]), 'answer': question},
-      targets=None,
-      batch_size=1
-    )
+    model = AttentionChatBotModel(question)
   model.build()
 
   saver = tf.train.Saver()

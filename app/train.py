@@ -16,7 +16,7 @@ from windbag.model.model import model_fn
 def _get_model_dir(parsed_args):
   exp_name = (("attention" if parsed_args.use_attention else "basic") +
               "-step_" + str(parsed_args.num_steps) +
-              "-batch_" + str(config.BATCH_SIZE) +
+              "-batch_" + str(parsed_args.batch_size) +
               "-lr_" + str(config.LR))
   if parsed_args.tag:
     exp_name += "-" + parsed_args.tag
@@ -53,6 +53,7 @@ def experiment_fn(run_config, hparams):
     train_steps=hparams.train_steps,
     eval_hooks=[eval_initializer_hook],
     eval_steps=None,
+    train_steps_per_iteration=hparams.steps_per_eval
   )
   return experiment
 
@@ -71,15 +72,16 @@ def main():
     learning_rate=parsed_args.lr,
     train_steps=parsed_args.num_steps,
     buckets=config.BUCKETS,
-    batch_size=config.BATCH_SIZE,
+    batch_size=parsed_args.batch_size,
     shuffle=True,
     shuffle_size=256,
+    steps_per_eval=parsed_args.steps_per_eval
   )
 
   learn_runner.run(
     experiment_fn=experiment_fn,
     run_config=run_config,
-    schedule="train_and_evaluate",
+    schedule="continuous_train_and_eval",
     hparams=params
   )
 
@@ -100,6 +102,12 @@ def get_parser():
                       help="define where to save model. "
                            "This is the root dir, every run of experiment will have "
                            "its own sub dir with name generated internally.")
+  parser.add_argument("--steps-per-eval", dest="steps_per_eval", type=int, default=None,
+                      help="Number of steps between each evaluation,"
+                           "`None` by default. if this is `None`, "
+                           "evaluation only happens once after train.")
+  parser.add_argument("--batch-size", dest="batch_size", type=int, default=None,
+                      help="Batch size.")
   return parser
 
 
