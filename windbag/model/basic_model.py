@@ -11,24 +11,25 @@ ANSWER_END = 3
 ANSWER_MAX = 60
 
 
-def create_loss(final_outputs, labels):
+def create_loss(final_outputs, answers, answer_lens):
   '''
   Final outputs of the decoder may have different length with
   target answer. So we should pad the outputs if the outputs
   are shorter than target answer, and pad the target answers
   if outputs are longer than answers.
+  :param answer_lens:
+   `Tensor` that representing length of answers
   :param final_outputs: the output of decoder
-  :param labels: the target answers
+  :param answers: the target answers
   :return: tuple of loss_op and train_op
   '''
   with tf.variable_scope('loss') as scope:
-    target_lens_tensor = labels['answer_len']
-    target_tensor = tf.transpose(labels['answer'], (1, 0))
-    print("target_tensor[0]: ", target_tensor[0])
+    answsers = tf.transpose(answers, (1, 0))
+    print("target_tensor[0]: ", answsers[0])
     print("final_outputs: ", final_outputs.get_shape())
-    print("decoder_inputs_tensor: ", target_tensor.get_shape())
+    print("decoder_inputs_tensor: ", answsers.get_shape())
 
-    answer_max_len = tf.reduce_max(target_lens_tensor)
+    answer_max_len = tf.reduce_max(answer_lens)
     output_len = tf.shape(final_outputs)[0]
 
     def loss_with_padded_outputs():
@@ -39,7 +40,7 @@ def create_loss(final_outputs, labels):
       paddings = tf.scatter_nd(indexes, values, shape)
       padded_outputs = tf.pad(final_outputs, paddings)
       return tf.nn.sparse_softmax_cross_entropy_with_logits(
-        logits=padded_outputs, labels=target_tensor[1:])
+        logits=padded_outputs, labels=answsers[1:])
 
     def loss_with_padded_answers():
       indexes = [[0, 1]]
@@ -47,7 +48,7 @@ def create_loss(final_outputs, labels):
       # because rank of answers tensor is 2, so the shape is (2, 2)
       shape = [2, 2]
       paddings = tf.scatter_nd(indexes, values, shape)
-      padded_answer = tf.pad(target_tensor, paddings)
+      padded_answer = tf.pad(answsers, paddings)
       return tf.nn.sparse_softmax_cross_entropy_with_logits(
         logits=final_outputs, labels=padded_answer[1:])
 
@@ -55,20 +56,20 @@ def create_loss(final_outputs, labels):
 
     losses_length = tf.shape(losses)[0]
     loss_mask = tf.sequence_mask(
-      tf.to_int32(target_lens_tensor), losses_length)
+      tf.to_int32(answer_lens), losses_length)
 
     losses = losses * tf.transpose(tf.to_float(loss_mask), [1, 0])
     # self.loss = tf.reduce_mean(losses)
-    loss = tf.reduce_sum(losses) / tf.to_float(tf.reduce_sum(target_lens_tensor - 1))
+    loss = tf.reduce_sum(losses) / tf.to_float(tf.reduce_sum(answer_lens - 1))
 
   return loss
 
 
 class BasicChatBotModel(ChatBotModelBase):
-  def __init__(self, features):
-    super(BasicChatBotModel, self).__init__(features)
+  def __init__(self, questions):
+    super(BasicChatBotModel, self).__init__(questions)
 
-    self.source_tensor = tf.transpose(features['question'], (1, 0))
+    self.source_tensor = tf.transpose(questions, (1, 0))
 
   @property
   def summaries(self, use_all=False):
