@@ -140,8 +140,10 @@ class BasicChatBotModel(ChatBotModelBase):
   def decode(self, enc_outputs, enc_final_state):
     with tf.variable_scope(self.decoder.scope):
       def condition(time, all_outputs: tf.TensorArray, inputs, states):
+        def has_end_word(t):
+          return tf.reduce_any(tf.equal(t, ANSWER_MAX))
         # bucket_length = tf.shape(self.target_tensor)[0]
-        all_ends = tf.reduce_all(all_outputs.read(time) == ANSWER_END)
+        all_ends = tf.reduce_all(tf.map_fn(has_end_word, all_outputs, dtype=tf.bool))
         return tf.logical_and(tf.logical_not(all_ends), tf.less(time, ANSWER_MAX))
         # return tf.reduce_all(self.decoder_length_tensor > time)
 
